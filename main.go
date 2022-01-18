@@ -59,78 +59,88 @@ func handleReq(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		body, _ := ioutil.ReadAll(r.Body)
 		r.Body.Close()
-		
+
 		var msg tg.Msg
-		_, query, reply, _ := ParseUpdate(body)
-	
+		var markup tg.ReplyMarkup
+		query, reply, _ := ParseUpdate(body)
+
 		switch query.Cmd {
 		case "start":
-			msg = tg.Msg{
-				Text: "Приветртвуем вас в кафе Буратино",
-				// Keyboard: MainMenu()
-			}
+			msg = tg.Text("Приветртвуем вас в кафе Буратино")
+			markup = Keyboard(
+				)
 		case "menu":
-			msg = menu.Show()
+			msg, markup = menu.Show()
 		case "group":
-			msg = menu.ShowGroup(query.Value)
+			// msg, markup = menu.ShowGroup(query.Value)
 		case "item":
-			msg = menu.ShowItem(query.Value)
+			// msg, markup = menu.ShowItem(query.Value)
 		}
 
-		reply(msg)
+		reply(msg, markup)
 	}
 }
 
-type ReplyFn func(m tg.Msg) 
+type ReplyFn func(tg.Msg, tg.ReplyMarkup)
 
-func ParseUpdate(bytes []byte) (*tg.Update, *Query, ReplyFn, error) {
+func Keyboard(buttons ...tg.Button) tg.ReplyMarkup {
+	var keyboard tg.Keyboard
+
+	for _, b := range buttons {
+		keyboard = append(keyboard, []tg.Button{b})
+	}
+	
+	return tg.ReplyMarkup{Keyboard: keyboard}
+}
+
+func ParseUpdate(bytes []byte) (*Query, ReplyFn, error) {
 	var update tg.Update
 	err := json.Unmarshal(bytes, &update)
 	if err != nil {
 		fmt.Printf("JSON parse error: %v", err)
-		return nil, nil, nil, nil
+		return nil, nil, err
 	}
 	// fmt.Printf("\n incoming req \n%+v\n%+v\n",
-		// update.Command, update.Query)
+	// update.Command, update.Query)
 
 	if update.Command != nil {
-		reply := func(msg tg.Msg) {
-			update.Command.Chat.Send(msg)
+		reply := func(msg tg.Msg, markup tg.ReplyMarkup) {
+			update.Command.Chat.Send(msg, markup)
 		}
-		
-		return &update, &Query{update.Command.Text, ""}, reply, nil
+
+		return &Query{update.Command.Text, ""}, reply, nil
 	} else if update.Query != nil {
 		q, err := ParseQuery(update.Query.Data)
 		if err != nil {
-			fmt.Println(err)
+			return nil, nil, err
 		}
-		
-		reply := func(msg tg.Msg) {
-			update.Command.Chat.Send(msg)
+
+		reply := func(msg tg.Msg, markup tg.ReplyMarkup) {
+			update.Query.Message.Edit(msg, markup)
 		}
-		
-		return &update, &q, reply, nil
+
+		return &q, reply, nil
 
 	} else {
-		return nil, nil, nil, nil
+		return nil, nil, errors.New("Update parse error Command & Query both are nil")
 	}
 }
 
-func (menu Menu) Show() tg.Msg {
+func (menu Menu) Show() (tg.Photo, tg.ReplyMarkup) {
 	groups := func(a MenuItem) string {
 		return a.Group
 	}
 
 	items := Unique(menu.Map(groups))
-	// nav := []string{"<< назад", "menu"}
-
-	return tg.Msg{
-		Photo:          Photo,
-		InlineKeyboard: Keyboard("group", items),
-	}
+	key := Keyboard1("group", items)
+	return tg.Photo{Photo: Photo}, InlineKeyboard(key)
 }
 
-func (menu Menu) ShowGroup(group string) tg.Msg {
+func InlineKeyboard(keyboard tg.Keyboard) tg.ReplyMarkup {
+	return tg.ReplyMarkup{}
+}
+
+func (menu Menu) ShowGroup(group string) tg.Photo {
 	byGroup := func(item MenuItem) bool {
 		return item.Group == group
 	}
@@ -139,11 +149,12 @@ func (menu Menu) ShowGroup(group string) tg.Msg {
 		return a.Title
 	}
 
-	items := menu.Search(byGroup).Map(titles)
+	_ = menu.Search(byGroup).Map(titles)
+	// back := tg.Button{"<< назад", "menu"}
+	// keyboard := append(Keyboard("item", items), []tg.Button{back})
 
-	return tg.Msg{
-		Photo:          Photo1,
-		InlineKeyboard: Keyboard("item", items),
+	return tg.Photo{
+		Photo: Photo1,
 	}
 }
 
@@ -171,24 +182,24 @@ func Unique(items []string) []string {
 
 }
 
-func Keyboard(q string, items []string) tg.Keyboard {
+func Keyboard1(q string, items []string) tg.Keyboard {
 	var keyboard tg.Keyboard
 	for _, el := range items {
 		q := fmt.Sprintf("%s=%s", q, el)
 		keyboard = append(keyboard,
 			[]tg.Button{
-				tg.Button{Text: el, Query: q}})
+				tg.Button{el, q}})
 	}
 
 	return keyboard
 }
 
-func (menu Menu) ShowItem(title string) tg.Msg {
+func (menu Menu) ShowItem(title string) tg.Photo {
 	// items := menu.Search(func(item MenuItem) bool {
 	// 	return item.Title == title
 	// })
 
-	return tg.Msg{}
+	return tg.Photo{}
 }
 
 func (menu Menu) Search(f func(item MenuItem) bool) Menu {

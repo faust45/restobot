@@ -17,7 +17,7 @@ const (
 	ApiURL = "https://api.telegram.org/bot%s/%s"
 
 	APItext      APImethod = "sendMessage"
-	APIphoto     APImethod = "sendPhoto"
+	APIsendPhoto APImethod = "sendPhoto"
 	APIeditPhoto APImethod = "editMessageMedia"
 )
 
@@ -66,8 +66,15 @@ type Button struct {
 	Query string `json:"callback_data,omitempty"`
 }
 
-type Keyboard [][]Button
 
+type Text string
+
+type Photo struct {
+	Photo   string
+	Caption string
+}
+
+type Keyboard [][]Button
 type ReplyMarkup struct {
 	Keyboard       Keyboard `json:"keyboard,omitempty"`
 	InlineKeyboard Keyboard `json:"inline_keyboard,omitempty"`
@@ -77,15 +84,7 @@ type ReplyMarkup struct {
 type media struct {
 	Type  string `json:"type"`
 	Media string `json:"media"`
-}
-
-
-type Msg struct {
-	Photo          string
-	Caption        string
-	Text           string
-	InlineKeyboard Keyboard
-	Keyboard       Keyboard
+	Caption string `json:"caption"`
 }
 
 type message struct {
@@ -93,49 +92,86 @@ type message struct {
 	ChatId      int         `json:"chat_id"`
 	Text        string      `json:"text,omitempty"`
 	Photo       string      `json:"photo,omitempty"`
+	Caption     string      `json:"photo,omitempty"`
 	Media       media       `json:"media,omitempty"` // only for edit req
 	ReplyMarkup ReplyMarkup `json:"reply_markup,omitempty"`
 }
 
-func (chat Chat) Send(msg Msg) {
-	m := message{
-		ChatId: chat.Id,
-		Photo:  msg.Photo,
-		ReplyMarkup: ReplyMarkup{
-			InlineKeyboard: msg.InlineKeyboard,
-			Keyboard: msg.Keyboard,
-		},
-	}
-
-	m.send(APIphoto)
+type Msg interface {
+	toMessage() message
+	toEditMessage() message
+	sendMethod() APImethod
+	editMethod() APImethod
 }
 
-func (m QMessage) Send(msg Msg) {
-	edit := message{
-		Id:     m.Id,
-		ChatId: m.Chat.Id,
-		Media:  media{"photo", msg.Photo},
-		ReplyMarkup: ReplyMarkup{
-			InlineKeyboard: msg.InlineKeyboard,
+func (m Text) toMessage() message {
+	return message{Text: string(m)}
+}
+
+func (m Photo) toMessage() message {
+	return message{Photo: m.Photo, Caption: m.Caption}
+}
+
+func (m Text) toEditMessage() message {
+	return message{Text: string(m)}
+}
+
+func (m Photo) toEditMessage() message {
+	return message{
+		Media: media{
+			Type: "photo",
+			Media: m.Photo,
+			Caption: m.Caption,
 		},
 	}
+}
 
-	edit.send(APIeditPhoto)
+func (m Photo) sendMethod() APImethod {
+	return APIsendPhoto
+}
+
+func (m Photo) editMethod() APImethod {
+	return APIsendPhoto
+}
+
+func (m Text) sendMethod() APImethod {
+	return APItext
+}
+
+func (m Text) editMethod() APImethod {
+	return APItext
+}
+
+func (chat Chat) Send(msg Msg, markup ReplyMarkup) {
+	m := msg.toMessage()
+	m.ReplyMarkup = markup
+	method := msg.sendMethod()
+	m.ChatId = chat.Id
+	
+	m.send(method)
+}
+
+func (m QMessage) Edit(msg Msg, markup ReplyMarkup) {
+	edit := msg.toMessage()
+	method := msg.editMethod()
+	edit.ChatId = m.Chat.Id
+	edit.ReplyMarkup = markup
+	
+	edit.send(method)
 }
 
 func (msg message) send(method APImethod) *http.Response {
 	json, _ := json.Marshal(msg)
 	// resp := req(method, json)
 	// fmt.Printf("\n%s\n\n", resp.Status)
-	
+
 	url := fmt.Sprintf(ApiURL, Token, method)
 	resp, _ := http.Post(url, "application/json", bytes.NewBuffer(json))
 
 	if resp.Body != nil {
+		defer resp.Body.Close()
 		body, _ := ioutil.ReadAll(resp.Body)
 		fmt.Printf("Response \n%s\n", body)
-
-		defer resp.Body.Close()
 	}
 
 	return resp
